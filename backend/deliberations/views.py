@@ -62,16 +62,32 @@ class MessageStreamView(View):
             channel_name = f"conversation_{conversation_id}"
             pubsub.subscribe(channel_name)
             
-            # Send initial ping to keep alive
+            # Send initial ping
             yield f"event: ping\ndata: connected\n\n"
             
-            for message in pubsub.listen():
-                if message['type'] == 'message':
-                    data = message['data']
-                    # data is bytes, need to decode
-                    if isinstance(data, bytes):
-                        data = data.decode('utf-8')
-                    yield f"event: message\ndata: {data}\n\n"
+            try:
+                while True:
+                    # Use get_message with timeout to allow sending pings
+                    message = pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
+                    if message:
+                        data = message['data']
+                        if isinstance(data, bytes):
+                            data = data.decode('utf-8')
+                        yield f"event: message\ndata: {data}\n\n"
+                        
+                        # Stop if we see a 'final' type message in the data
+                        try:
+                            json_data = json.loads(data)
+                            if json_data.get('type') == 'final':
+                                break
+                        except:
+                            pass
+                    else:
+                        # Timeout reached, send a ping to keep connection alive
+                        yield f"event: ping\ndata: pong\n\n"
+            finally:
+                pubsub.unsubscribe(channel_name)
+                pubsub.close()
 
         response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'

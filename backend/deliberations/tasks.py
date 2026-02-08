@@ -7,7 +7,7 @@ from utils.stream import publish_update
 from langchain_core.messages import HumanMessage
 
 @shared_task
-def run_deliberation_task(conversation_id: str, question: str, max_rounds: int = 3):
+def run_deliberation_task(conversation_id, question, max_rounds):
     # Store keys first (if not already stored separately, but task might run on different worker)
     # Actually, keys should be stored by the View before calling task to ensure they are available.
     # But just in case, we can refresh them or access them here.

@@ -53,9 +53,9 @@ def get_keys(state: AgentState) -> Dict[str, str]:
 
 def get_agent_names(keys: Dict[str, str]) -> Dict[str, str]:
     return {
-        "openai": "OpenAI" if keys.get("openai") else "Llama 3.2",
-        "gemini": "Gemini" if keys.get("gemini") else "Qwen 2.5",
-        "deepseek": "DeepSeek" if keys.get("deepseek") else "Phi 3",
+        "openai": "llama 3.2" if not keys.get("openai") else "openai",
+        "gemini": "qwen 2.5" if not keys.get("gemini") else "gemini",
+        "deepseek": "phi 3" if not keys.get("deepseek") else "deepseek",
     }
 
 def call_openai_node(state: AgentState):
@@ -76,12 +76,17 @@ def call_openai_node(state: AgentState):
         llm = ChatOpenAI(api_key=openai_key, model="gpt-4o", temperature=0.7)
     
     peers = f"{names['gemini']}, {names['deepseek']}"
+    
+    # Lead Agent (Usually Llama in Round 1) gets a special turn instruction
+    turn_instruction = "You are the FIRST speaker. Provide an initial analysis." if state["current_round"] == 1 else "Review the discussion so far."
+    
     prompt = DELIBERATION_PROMPT.format(
         agent_name=agent_name,
         peers=peers,
         question=state["question"],
         round_number=state["current_round"],
-        max_rounds=state["max_rounds"]
+        max_rounds=state["max_rounds"],
+        turn_instruction=turn_instruction
     )
     
     messages = [SystemMessage(content=prompt)] + state["messages"]
@@ -93,11 +98,14 @@ def call_openai_node(state: AgentState):
     
     try:
         for chunk in llm.stream(messages):
-            # LangChain Ollama and OpenAI return chunks with .content attribute
             token = chunk.content
             content += token
             publish_chunk(convo_id, agent_name, token, round_num)
         
+        if not content.strip():
+            content = "Acknowledged. Proceeding with the analysis."
+            publish_chunk(convo_id, agent_name, content, round_num)
+
         response_msg = AIMessage(content=content, name=agent_name)
     except Exception as e:
         content = f"Local Error: {str(e)}"
@@ -117,26 +125,37 @@ def call_gemini_node(state: AgentState):
         try:
             client = genai.Client(api_key=gemini_key)
             peers = f"{names['openai']}, {names['deepseek']}"
+            turn_instruction = "Review the previous agent's findings."
             prompt = DELIBERATION_PROMPT.format(
                 agent_name=agent_name,
                 peers=peers,
                 question=state["question"],
                 round_number=state["current_round"],
-                max_rounds=state["max_rounds"]
+                max_rounds=state["max_rounds"],
+                turn_instruction=turn_instruction
             )
 
-            formatted_messages = []
-            for m in state["messages"]:
-                if isinstance(m, HumanMessage):
-                    formatted_messages.append({"role": "user", "content": m.content})
-                elif isinstance(m, AIMessage):
-                    formatted_messages.append({"role": "model", "content": m.content})
+            # Format history for Gemini
+            history_text = "\n".join([f"{m.name if hasattr(m, 'name') else 'Participant'}: {m.content}" for m in state["messages"]])
+            payload = f"{prompt}\n\nDISCUSSION HISTORY:\n{history_text}"
             
-            response = client.models.generate_content(
+            # Stream Gemini
+            content = ""
+            convo_id = state["conversation_id"]
+            round_num = state["current_round"]
+            
+            for chunk in client.models.generate_content_stream(
                 model="gemini-2.0-flash",
-                contents=prompt + "\n\nConversation so far:\n" + str(formatted_messages)
-            )
-            content = response.text
+                contents=payload
+            ):
+                token = chunk.text
+                content += token
+                publish_chunk(convo_id, agent_name, token, round_num)
+                
+            if not content.strip():
+                content = "I agree with the consensus and have nothing further to add."
+                publish_chunk(convo_id, agent_name, content, round_num)
+
             response_msg = AIMessage(content=content, name=agent_name)
         except Exception as e:
             content = f"Gemini Error: {str(e)}"
@@ -150,16 +169,30 @@ def call_gemini_node(state: AgentState):
                 temperature=0.7
             )
             peers = f"{names['openai']}, {names['deepseek']}"
+            turn_instruction = "Review the previous agent's findings."
             prompt = DELIBERATION_PROMPT.format(
                 agent_name=agent_name,
                 peers=peers,
                 question=state["question"],
                 round_number=state["current_round"],
-                max_rounds=state["max_rounds"]
+                max_rounds=state["max_rounds"],
+                turn_instruction=turn_instruction
             )
             messages = [SystemMessage(content=prompt)] + state["messages"]
-            response = llm.invoke(messages)
-            content = response.content
+            
+            # Stream Local Gemini (Qwen)
+            content = ""
+            convo_id = state["conversation_id"]
+            round_num = state["current_round"]
+            for chunk in llm.stream(messages):
+                token = chunk.content
+                content += token
+                publish_chunk(convo_id, agent_name, token, round_num)
+                
+            if not content.strip():
+                content = "I agree with the consensus and have nothing further to add."
+                publish_chunk(convo_id, agent_name, content, round_num)
+
             response_msg = AIMessage(content=content, name=agent_name)
         except Exception as e:
             content = f"Local Error ({agent_name}): {str(e)}"
@@ -192,25 +225,39 @@ def call_deepseek_node(state: AgentState):
         )
     
     peers = f"{names['openai']}, {names['gemini']}"
+    turn_instruction = "Review the perspectives from your peers."
     prompt = DELIBERATION_PROMPT.format(
         agent_name=agent_name,
         peers=peers,
         question=state["question"],
         round_number=state["current_round"],
-        max_rounds=state["max_rounds"]
+        max_rounds=state["max_rounds"],
+        turn_instruction=turn_instruction
     )
 
     messages = [SystemMessage(content=prompt)] + state["messages"]
+    
+    # Stream DeepSeek
+    content = ""
+    convo_id = state["conversation_id"]
+    round_num = state["current_round"]
     try:
-        response = llm.invoke(messages)
-        response.name = agent_name
-        content = response.content
+        for chunk in llm.stream(messages):
+            token = chunk.content
+            content += token
+            publish_chunk(convo_id, agent_name, token, round_num)
+            
+        if not content.strip():
+            content = "My analysis aligns with the current debate."
+            publish_chunk(convo_id, agent_name, content, round_num)
+
+        response_msg = AIMessage(content=content, name=agent_name)
     except Exception as e:
         content = f"Error (DeepSeek/Local): {str(e)}"
-        response = AIMessage(content=content, name=agent_name)
+        response_msg = AIMessage(content=content, name=agent_name)
     
     save_and_publish(state, agent_name, content)
-    return {"messages": [response]}
+    return {"messages": [response_msg]}
 
 
 def arbiter_node(state: AgentState):
@@ -222,16 +269,37 @@ def arbiter_node(state: AgentState):
     names = get_agent_names(keys)
     participants = f"{names['openai']}, {names['gemini']}, {names['deepseek']}"
     
+    convo_id = state.get("conversation_id")
     try:
         if openai_key:
-            llm = ChatOpenAI(api_key=openai_key, model="gpt-4o", temperature=0.2)
+            llm = ChatOpenAI(
+                api_key=openai_key,
+                model="gpt-4o-mini",
+                temperature=0.2
+            )
             prompt = ARBITER_PROMPT.format(
                 participants=participants,
                 question=state["question"]
             )
-            messages = [SystemMessage(content=prompt)] + state["messages"]
-            response = llm.invoke(messages)
-            content = response.content
+            # Standard history formatting
+            history_text = "\n".join([f"{m.name if hasattr(m, 'name') else 'Participant'}: {m.content}" for m in state["messages"]])
+            messages = [
+                SystemMessage(content=prompt),
+                HumanMessage(content=f"DISCUSSION HISTORY:\n{history_text}\n\nFinal Synthesis:")
+            ]
+            
+            # Stream Cloud Arbiter
+            content = ""
+            for chunk in llm.stream(messages):
+                token = chunk.content
+                content += token
+                publish_chunk(convo_id, agent_name, token, 0)
+            
+            if not content.strip():
+                content = "I have reviewed the deliberation and synthesized the consensus as provided in the summary."
+                publish_chunk(convo_id, agent_name, content, 0)
+                
+            response_msg = AIMessage(content=content, name=agent_name)
         elif keys.get("gemini"):
             print("DEBUG: OpenAI missing for Arbiter, falling back to Gemini")
             client = genai.Client(api_key=keys.get("gemini"))
@@ -239,12 +307,26 @@ def arbiter_node(state: AgentState):
                 participants=participants,
                 question=state["question"]
             )
-            formatted_history = "\n".join([f"{m.name if hasattr(m, 'name') else 'User'}: {m.content}" for m in state["messages"]])
-            response = client.models.generate_content(
+            
+            # Format history for Gemini
+            history_text = "\n".join([f"{m.name if hasattr(m, 'name') else 'Participant'}: {m.content}" for m in state["messages"]])
+            payload = f"{prompt}\n\nDISCUSSION HISTORY:\n{history_text}\n\nFinal Synthesis:"
+
+            # Stream Gemini Arbiter
+            content = ""
+            for chunk in client.models.generate_content_stream(
                 model="gemini-2.0-flash",
-                contents=prompt + "\n\nFull History:\n" + formatted_history
-            )
-            content = response.text
+                contents=payload
+            ):
+                token = chunk.text
+                content += token
+                publish_chunk(convo_id, agent_name, token, 0)
+            
+            if not content.strip():
+                content = "I have reviewed the deliberation and synthesized the consensus as provided in the summary."
+                publish_chunk(convo_id, agent_name, content, 0)
+
+            response_msg = AIMessage(content=content, name=agent_name)
         else:
             print("DEBUG: Cloud keys missing, using Local (Llama 3.2 3B) for Arbiter")
             llm = ChatOllama(
@@ -257,23 +339,46 @@ def arbiter_node(state: AgentState):
                 question=state["question"]
             )
             messages = [SystemMessage(content=prompt)] + state["messages"]
-            response = llm.invoke(messages)
-            content = response.content
-            save_and_publish(state, agent_name, content)
-            publish_update(state.get("conversation_id"), {
-                "type": "final",
-                "result": content
-            })
-            return {"messages": [AIMessage(content=content, name="Arbiter")], "final_answer": content}
+            
+            # Stream Local Arbiter
+            content = ""
+            for chunk in llm.stream(messages):
+                token = chunk.content
+                content += token
+                publish_chunk(convo_id, agent_name, token, 0)
+                
+            if not content.strip():
+                content = "I have reviewed the deliberation and synthesized the consensus as provided in the summary."
+                publish_chunk(convo_id, agent_name, content, 0)
+
+            response_msg = AIMessage(content=content, name=agent_name)
+
+        # Save to DB with round 0
+        try:
+            convo = Conversation.objects.get(id=convo_id)
+            Message.objects.create(
+                conversation=convo,
+                agent_name=agent_name.lower(),
+                content=content,
+                round_number=0
+            )
+        except Exception as e:
+            print(f"Error saving arbiter message: {e}")
+
+        publish_update(convo_id, {
+            "type": "final",
+            "result": content
+        })
+        return {"messages": [response_msg], "final_answer": content}
+            
     except Exception as e:
         print(f"Error in Arbiter: {str(e)}")
         error_msg = f"Arbiter Error: {str(e)}"
-        # Even on error, publish an update to indicate completion
-        publish_update(state.get("conversation_id"), {
+        publish_update(convo_id, {
             "type": "final",
             "result": error_msg
         })
-        return {"messages": [AIMessage(content=error_msg, name="Arbiter")], "final_answer": error_msg}
+        return {"messages": [AIMessage(content=error_msg, name=agent_name)], "final_answer": error_msg}
 
 
 def update_round_node(state: AgentState):

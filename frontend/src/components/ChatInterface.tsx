@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { startDeliberation, getStreamUrl } from '../services/api';
+import { startDeliberation, getStreamUrl, getConversationHistory } from '../services/api';
 import MessageItem from './MessageItem';
 
 interface ChatInterfaceProps {
@@ -15,7 +15,7 @@ interface Message {
     content: string;
     round_number: number;
     timestamp?: string;
-    is_internal: boolean;
+    is_internal_thought?: boolean;
     type?: string;
 }
 
@@ -26,6 +26,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ apiKeys, maxRounds, onRes
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [currentRound, setCurrentRound] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
+
+    const syncHistory = async (convoId: string) => {
+        try {
+            const history = await getConversationHistory(convoId);
+            if (history && history.length > 0) {
+                setMessages(history);
+            }
+        } catch (err) {
+            console.error("Failed to sync history:", err);
+        }
+    };
 
     const handleStart = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -41,7 +52,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ apiKeys, maxRounds, onRes
                 agent_name: 'user',
                 content: question,
                 round_number: 0,
-                is_internal: false
+                is_internal_thought: false
             };
             setMessages([userMsg]);
             const currentQ = question; // Capture current question
@@ -60,19 +71,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ apiKeys, maxRounds, onRes
                 console.log('SSE connection opened');
             };
 
-            source.addEventListener('message', (event) => {
+            source.addEventListener('message', async (event) => {
                 try {
                     const data = JSON.parse(event.data);
 
                     if (data.type === 'token') {
                         setMessages((prev) => {
-                            const lastMsg = prev[prev.length - 1];
-                            // If the last message is from the same agent and round, append it
-                            if (lastMsg && lastMsg.agent_name === data.agent && lastMsg.round_number === data.round) {
-                                return [
-                                    ...prev.slice(0, -1),
-                                    { ...lastMsg, content: lastMsg.content + data.content }
-                                ];
+                            // Find existing message for this specific agent and round
+                            const msgIndex = prev.findIndex(m => m.agent_name === data.agent && m.round_number === data.round);
+
+                            if (msgIndex !== -1) {
+                                const newMessages = [...prev];
+                                const existingMsg = newMessages[msgIndex];
+                                newMessages[msgIndex] = { ...existingMsg, content: existingMsg.content + data.content };
+                                return newMessages;
                             } else {
                                 // Start a new message for this agent
                                 return [
@@ -81,7 +93,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ apiKeys, maxRounds, onRes
                                         agent_name: data.agent,
                                         content: data.content,
                                         round_number: data.round || 0,
-                                        is_internal: false
+                                        is_internal_thought: false
                                     }
                                 ];
                             }
@@ -96,17 +108,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ apiKeys, maxRounds, onRes
                                 agent_name: data.agent,
                                 content: data.content,
                                 round_number: data.round || 0,
-                                is_internal: false
+                                is_internal_thought: false
                             }];
                         });
                     } else if (data.type === 'round_update') {
                         setCurrentRound(data.round);
                     } else if (data.type === 'final') {
                         // Final answer received
+                        await syncHistory(convoId);
                         setLoading(false);
                         source.close();
                     } else if (data.type === 'error') {
                         console.error("Server Error:", data.message);
+                        await syncHistory(convoId);
                         setLoading(false);
                         source.close();
                     }
@@ -116,8 +130,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ apiKeys, maxRounds, onRes
                 }
             });
 
-            source.onerror = (err) => {
+            source.onerror = async (err) => {
                 console.error('SSE error', err);
+                await syncHistory(convoId);
                 source.close();
                 setLoading(false);
             };
@@ -143,7 +158,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ apiKeys, maxRounds, onRes
     const filteredMessages = messages.filter(msg => {
         if (showReasoning) return true;
         // Always show User and Arbiter (Final Answer)
-        if (msg.agent_name === 'user' || msg.agent_name === 'Arbiter') return true;
+        const name = msg.agent_name.toLowerCase();
+        if (name === 'user' || name === 'arbiter') return true;
         return false;
     });
 
