@@ -2,22 +2,18 @@
 
 **Deliberation.ai** is a sophisticated multi-agent consensus engine designed to synthesize high-quality answers through structured AI debate. It pits multiple LLMs against each other to critique, refine, and harmonize perspectives on complex questions.
 
-## 🚀 Features
+## 🚀 Latest Upgrades (Feb 8, 2026)
 
-- **Multi-Agent Deliberation**: Uses a "Panel of Experts" (Llama 3.2, Qwen 2.5, and Phi 3 or cloud models) to evaluate questions from multiple angles.
-- **Adjustable Depth**: Configure 1-5 rounds of deliberation. More rounds lead to deeper critique and more robust consensus.
-- **Real-time Streaming**: "ChatGPT-style" token-by-token streaming for a dynamic, live deliberation experience.
-- **Local-First (M1 Optimized)**: Fully supports local execution using **Ollama**, optimized specifically for Apple Silicon (M1/M2/M3) MacBook Airs.
-- **Aesthetic UI**: A premium, glassmorphic React interface with real-time feedback and state management.
+- **Anti-Hallucination Mode**: Agents are now strictly round-aware, preventing them from roleplaying their peers.
+- **Dual-Model Support**: Seamlessly switch between OpenAI/Gemini/DeepSeek and Local Ollama models.
+- **SSE Stability**: Integrated heartbeat pings to ensure long Arbiter sessions don't time out.
+- **Optimized SLMs**: Tuned for 8GB RAM M1/M2 MacBooks using 1B-3B parameters models.
 
-## 🛠 Tech Stack
-
-- **Backend**: Python, Django, Celery, Redis, LangChain, LangGraph.
-- **Frontend**: React, TypeScript, Tailwind CSS, Vite.
-- **Local Models**: Ollama (llama3.2:1b, qwen2.5:1.5b, phi3:mini, llama3.2:3b).
-- **Orchestration**: Docker Compose.
+## 🧠 Architectural Deep-Dive
+For a detailed look at the LangGraph orchestration, streaming implementation, and model optimizations, see [UPGRADES_DETAIL.md](file:///Users/monishsoorya/Documents/CHAT_AGENTS/UPGRADES_DETAIL.md).
 
 ## 📦 Getting Started
+...
 
 ### Prerequisites
 1.  **Docker & Docker Compose**
