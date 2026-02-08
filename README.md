@@ -26,16 +26,22 @@ For a detailed look at the LangGraph orchestration, streaming implementation, an
     ```
 
 ### Installation
-1.  Clone the repository:
+1.  **Clone the repository**:
     ```bash
     git clone https://github.com/monishsoorya/deliberation.ai.git
     cd deliberation.ai
     ```
-2.  Start the services:
+2.  **Start the Backend (Docker)**:
     ```bash
     docker-compose up -d
     ```
-3.  Access the UI:
+3.  **Setup & Run the Frontend**:
+    ```bash
+    cd frontend
+    npm install
+    npm run dev
+    ```
+4.  **Access the UI**:
     Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## 🧠 How it Works
