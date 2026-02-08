@@ -274,14 +274,14 @@ def arbiter_node(state: AgentState):
         if openai_key:
             llm = ChatOpenAI(
                 api_key=openai_key,
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 temperature=0.2
             )
             prompt = ARBITER_PROMPT.format(
                 participants=participants,
                 question=state["question"]
             )
-            # Standard history formatting
+            # Standard history formatting for all models
             history_text = "\n".join([f"{m.name if hasattr(m, 'name') else 'Participant'}: {m.content}" for m in state["messages"]])
             messages = [
                 SystemMessage(content=prompt),
@@ -338,7 +338,12 @@ def arbiter_node(state: AgentState):
                 participants=participants,
                 question=state["question"]
             )
-            messages = [SystemMessage(content=prompt)] + state["messages"]
+            # Standard history formatting for Local Arbiter
+            history_text = "\n".join([f"{m.name if hasattr(m, 'name') else 'Participant'}: {m.content}" for m in state["messages"]])
+            messages = [
+                SystemMessage(content=prompt),
+                HumanMessage(content=f"DISCUSSION HISTORY:\n{history_text}\n\nFinal Synthesis:")
+            ]
             
             # Stream Local Arbiter
             content = ""
