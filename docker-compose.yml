@@ -1,0 +1,73 @@
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=deliberations_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+
+  backend:
+    build: 
+      context: ./backend
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DEBUG=True
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - REDIS_URL=redis://redis:6379/2
+      - POSTGRES_NAME=deliberations_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_HOST=db
+      - SECRET_KEY=unsafe-development-key-change-in-prod
+      - FERNET_KEY=change-me-to-proper-fernet-key-32-chars-base64==
+
+  worker:
+    build: 
+      context: ./backend
+    command: celery -A backend worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - backend
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - REDIS_URL=redis://redis:6379/2
+      - POSTGRES_NAME=deliberations_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_HOST=db
+      - SECRET_KEY=unsafe-development-key-change-in-prod
+      - FERNET_KEY=change-me-to-proper-fernet-key-32-chars-base64==
+
+# Frontend setup postponed as strict separation requested, but for full dev env:
+#  frontend:
+#    build:
+#      context: ./frontend
+#    command: npm run dev -- --host
+#    volumes:
+#      - ./frontend:/app
+#    ports:
+#      - "5173:5173"
